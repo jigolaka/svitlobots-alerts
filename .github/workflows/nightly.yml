@@ -1,4 +1,4 @@
-name: Nightly Power and Restoration Alerts
+name: Nightly Power Outages and Restoration Alerts
 
 on:
   schedule:
