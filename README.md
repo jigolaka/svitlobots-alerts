@@ -47,17 +47,21 @@ overnight Python window; its matching cron hours would be `22-23,0-5`.
    and branch rules must allow creation/writes to `svitlobot-state`. The
    workflow uses the automatic, short-lived `GITHUB_TOKEN`; **do not create a
    personal access token or a secret named GITHUB_TOKEN**.
-5. In **Actions > Nightly power alerts > Run workflow**, select `dry-run` to
-   verify live scraping without secrets, email, or state writes. Then select
-   `test-email` to verify Gmail delivery at any time. Check spam if needed.
-   Selecting `check` performs a normal check only during the night window.
+5. In **Actions > Nightly Power Outages and Restoration Alerts > Run workflow**,
+  select `dry-run` to verify live scraping without secrets, email, or state
+  writes. Select `test-email` to verify Gmail delivery at any time. Select
+  `test-restoration` to send clearly marked simulated restoration emails for
+  both default channels; it does not fetch Telegram or change tracking state.
+  Check spam if needed. Selecting `check` performs a normal check only during
+  the night window.
 6. Leave the schedule enabled. Optionally add repository **Variable**
    `NOTIFY_RESTORED=true` to receive recovery emails as well.
 
 Never paste credentials into issues, logs, commits, or chat. Secrets are
 passed only to the monitoring step, not to the test workflow. SMTP uses TLS
 with certificate verification; the program does not log credentials or email
-addresses. Test-email mode does not fetch Telegram or change tracking state.
+addresses. Test-email and test-restoration modes do not fetch Telegram or
+change tracking state.
 
 ## Alert And State Rules
 

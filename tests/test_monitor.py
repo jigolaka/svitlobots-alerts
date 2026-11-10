@@ -9,8 +9,9 @@ from unittest.mock import Mock, patch
 from zoneinfo import ZoneInfo
 
 from monitor import (
-    OUTAGE, RESTORED, ChannelState, FileStore, GitHubStore, Mailer,
-    decode_state, encode_state, fetch_events, night_key, parse_events, process_events,
+    DEFAULT_CHANNELS, OUTAGE, RESTORED, ChannelState, Event, FileStore,
+    GitHubStore, Mailer, decode_state, encode_state, fetch_events, main,
+    night_key, parse_events, process_events,
 )
 
 
@@ -212,6 +213,50 @@ class StorageAndTimeTests(unittest.TestCase):
         self.assertIn("POWER OUTAGE", str(sent["Subject"]))
         self.assertIn(event.url, sent.get_content())
         self.assertIn("07:18", sent.get_content())
+
+    @patch("monitor.smtplib.SMTP_SSL")
+    def test_simulated_restoration_email_is_marked_and_uses_restoration_format(self, smtp_class):
+        smtp_class.return_value.__enter__.return_value.send_message.return_value = {}
+        mailer = Mailer("sender@example.com", "fake",
+                        "recipient@example.com", ZoneInfo("Europe/Kyiv"))
+        event = Event(
+            0, "on", "07:18", datetime.fromisoformat(
+                "2026-11-10T05:22:41+00:00"),
+            "SIMULATION ONLY: This test assumes power has been restored.",
+            "No Telegram post; simulated test only.",
+        )
+
+        mailer.notify(CHANNEL, event, simulated=True)
+
+        sent = smtp_class.return_value.__enter__.return_value.send_message.call_args.args[0]
+        self.assertEqual(
+            str(sent["Subject"]),
+            f"[Svitlobot] POWER RESTORED: {CHANNEL} [SIMULATED TEST]",
+        )
+        body = sent.get_content()
+        self.assertIn("Status event: POWER RESTORED", body)
+        self.assertIn("SIMULATION ONLY", body)
+        self.assertIn("no live power status was checked", body)
+
+    def test_restoration_test_sends_both_channels_without_scraping_or_state(self):
+        with (
+            patch("sys.argv", ["monitor.py", "--test-restoration"]),
+            patch.dict("os.environ", {"CHANNELS": ",".join(DEFAULT_CHANNELS)}),
+            patch("monitor.Mailer.from_env") as mailer_factory,
+            patch("monitor.make_session") as make_session,
+        ):
+            self.assertEqual(main(), 0)
+
+        mailer = mailer_factory.return_value
+        self.assertEqual(
+            [call.args[0] for call in mailer.notify.call_args_list],
+            list(DEFAULT_CHANNELS),
+        )
+        for call in mailer.notify.call_args_list:
+            self.assertEqual(call.args[1].status, "on")
+            self.assertTrue(call.kwargs["simulated"])
+            self.assertIn("SIMULATION ONLY", call.args[1].text)
+        make_session.assert_not_called()
 
 
 if __name__ == "__main__":

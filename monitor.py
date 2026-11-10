@@ -81,6 +81,15 @@ DEFAULT_CHANNELS = ("svitlobot_ShevchenkoveBL", "svitlobot_juvileinyi")
 LOGGER = logging.getLogger("svitlobot")
 
 
+def configured_channels() -> tuple[str, ...]:
+    channels = tuple(channel.strip() for channel in os.getenv(
+        "CHANNELS", ",".join(DEFAULT_CHANNELS)).split(","))
+    if not channels or any(not re.fullmatch(r"[A-Za-z0-9_]+", channel) for channel in channels):
+        raise ValueError(
+            "CHANNELS must contain comma-separated Telegram usernames")
+    return channels
+
+
 @dataclass(frozen=True)
 class ChannelState:
     last_id: int
@@ -250,17 +259,25 @@ class Mailer:
             if refused:
                 raise RuntimeError("SMTP refused a recipient")
 
-    def notify(self, channel: str, event: Event) -> None:
+    def notify(self, channel: str, event: Event, *, simulated: bool = False) -> None:
         status = "POWER OUTAGE" if event.status == "off" else "POWER RESTORED"
         published = event.published_at.astimezone(
             self.timezone).isoformat(timespec="seconds")
+        subject = f"[Svitlobot] {status}: {channel}"
+        if simulated:
+            subject += " [SIMULATED TEST]"
+        disclaimer = (
+            "This is a simulated restoration test email; no live power status was checked."
+            if simulated else
+            "This reports a Telegram status post, not a direct power measurement. "
+            "A later post may already report a change."
+        )
         self.deliver(
-            f"[Svitlobot] {status}: {channel}",
+            subject,
             f"Channel: {channel}\nStatus event: {status}\n"
             f"Reported local event time: {event.clock} (channel's clock)\n"
             f"Post published: {published}\n\n{event.text}\n\n{event.url}\n\n"
-            "This reports a Telegram status post, not a direct power measurement. "
-            "A later post may already report a change.",
+            f"{disclaimer}",
         )
 
 
@@ -298,6 +315,8 @@ def main() -> int:
                        help="Fetch latest statuses without email or state changes; ignores night hours")
     modes.add_argument("--test-email", action="store_true",
                        help="Send a test email without scraping or state changes")
+    modes.add_argument("--test-restoration", action="store_true",
+                       help="Send simulated restoration emails without scraping or state changes")
     args = parser.parse_args()
     logging.basicConfig(level=logging.INFO, format="%(levelname)s %(message)s")
     try:
@@ -307,6 +326,20 @@ def main() -> int:
                 "[Svitlobot] Test email", "Gmail delivery is configured successfully.")
             LOGGER.info("Test email accepted by Gmail SMTP")
             return 0
+        if args.test_restoration:
+            mailer = Mailer.from_env(timezone)
+            now = datetime.now(timezone)
+            channels = configured_channels()
+            for channel in channels:
+                event = Event(
+                    0, "on", now.strftime("%H:%M"), now,
+                    "SIMULATION ONLY: This test assumes power has been restored.",
+                    "No Telegram post; simulated test only.",
+                )
+                mailer.notify(channel, event, simulated=True)
+            LOGGER.info(
+                "Sent %d simulated restoration test emails via Gmail SMTP", len(channels))
+            return 0
         night = night_key(
             datetime.now(timezone), int(os.getenv("NIGHT_START_HOUR", "0")),
             int(os.getenv("NIGHT_END_HOUR", "6")),
@@ -315,11 +348,7 @@ def main() -> int:
             LOGGER.info(
                 "Outside the configured night window; no scraping or email")
             return 0
-        channels = tuple(channel.strip() for channel in os.getenv(
-            "CHANNELS", ",".join(DEFAULT_CHANNELS)).split(","))
-        if not channels or any(not re.fullmatch(r"[A-Za-z0-9_]+", channel) for channel in channels):
-            raise ValueError(
-                "CHANNELS must contain comma-separated Telegram usernames")
+        channels = configured_channels()
         notify_restored = env_bool("NOTIFY_RESTORED")
         mailer = None if args.dry_run else Mailer.from_env(timezone)
         with make_session() as session:
