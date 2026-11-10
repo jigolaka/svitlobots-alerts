@@ -1,4 +1,4 @@
-name: Nightly power alerts
+name: Nightly Power and Restoration Alerts
 
 on:
   schedule:
